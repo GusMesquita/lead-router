@@ -83,9 +83,9 @@ Veja [frontend/](./frontend) — SPA React que lista os leads processados e seus
 
 ## Integrações
 
-- **Enriquecimento**: usa a [BrasilAPI](https://brasilapi.com.br) diretamente por padrão; aponte `BRASILAPI_URL` para uma instância do [brasilapi-mcp-server](../brasilapi-mcp-server) rodando em modo HTTP se preferir centralizar.
-- **Orquestração externa**: um workflow n8n pode chamar `/leads/ingest` como um HTTP Request node — veja [n8n-ai-cookbook](../n8n-ai-cookbook).
-- **Base de conhecimento**: para responder perguntas do lead automaticamente antes do roteamento, chame o [rag-starter-kit](../rag-starter-kit) como um passo extra.
+- **Enriquecimento**: usa a [BrasilAPI](https://brasilapi.com.br) diretamente por padrão; aponte `BRASILAPI_URL` para uma instância do `brasilapi-mcp-server` rodando em modo HTTP se preferir centralizar.
+- **Orquestração externa**: um workflow n8n pode chamar `/leads/ingest` como um HTTP Request node — veja `n8n-ai-cookbook`.
+- **Base de conhecimento**: para responder perguntas do lead automaticamente antes do roteamento, chame o `rag-starter-kit` como um passo extra.
 
 ## Testes
 
