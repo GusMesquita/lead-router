@@ -18,13 +18,13 @@ src/
 ├── lib/scoreTier.ts        # regra pura de classificação de score (testada)
 ├── lib/leadStats.ts         # agregação por tier + filtro (testada)
 ├── components/               # LeadTable, ScoreBadge, StatFilterBar, SkeletonRows
-└── index.css                  # entry point do Tailwind + tema (../../design-system)
+└── index.css                  # entry point do Tailwind + tema (fonte de verdade)
 ```
 
 Estilização é 100% Tailwind (utilities inline nos componentes) — não há CSS
-próprio além do `@theme` compartilhado em `index.css`. O tema (cores,
-gradiente de marca, animações) é copiado de
-[`design-system/tailwind-theme.css`](../../design-system/tailwind-theme.css).
+próprio além do bloco `@theme` em `src/index.css`, que é a única fonte de
+verdade de cores, tipografia e animações deste app. O tema é mantido **dentro
+deste repositório**: nada aqui depende de um pacote ou diretório externo.
 
 ## Scripts
 
