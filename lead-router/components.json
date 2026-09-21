@@ -21,5 +21,13 @@
   },
   "menuColor": "default",
   "menuAccent": "subtle",
-  "registries": {}
+  "registries": {
+    "@7ovr": "https://7ovr.com/r/{name}.json",
+    "@abui": "https://abui.io/r/{name}.json",
+    "@arc": "https://witharc.co/r/{name}.json",
+    "@akoder": "https://akoder.xyz/r/{name}.json",
+    "@bjork-ui": "https://ui.isaiahbjork.com/{name}.json",
+    "@blocks-so": "https://blocks.so/r/{name}.json",
+    "@bundui": "https://bundui.io/r/{name}.json"
+  }
 }
