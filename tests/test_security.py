@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from starlette.requests import Request
 
 from app import dispatch as dispatch_module
-from app import ratelimit
+from app import enrichment, ratelimit
 from app.auth import verify_auth_config
 from app.config import settings
 from app.logging_config import mask_email
@@ -199,3 +199,21 @@ async def test_rate_limit_separa_identidades(monkeypatch):
 )
 def test_mascara_email(entrada, esperado):
     assert mask_email(entrada) == esperado
+
+
+# --- S4: CNPJ malformado não vira chamada externa ---------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cnpj", ["1", "191312430001", "191312430001970", "não-é-cnpj"])
+async def test_cnpj_malformado_nao_chama_a_brasilapi(cnpj, monkeypatch):
+    def nao_deve_chamar(*args, **kwargs):
+        raise AssertionError("CNPJ inválido não pode virar chamada HTTP")
+
+    monkeypatch.setattr(enrichment.httpx, "AsyncClient", nao_deve_chamar)
+
+    resultado = await enrichment.enrich(
+        LeadIn(name="Fulano", email="fulano@exemplo.com", cnpj=cnpj)
+    )
+
+    assert resultado == {"cnpj_lookup_error": "CNPJ deve ter 14 dígitos"}

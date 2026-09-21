@@ -16,8 +16,15 @@ async def enrich(lead: LeadIn) -> dict:
         return {}
 
     digits = "".join(filter(str.isdigit, lead.cnpj))
+    # Sem o check de tamanho, um CNPJ vazio vira `/cnpj/v1/` (outro endpoint) e
+    # qualquer lixo vira uma chamada garantidamente perdida para fora.
+    if len(digits) != 14:
+        return {"cnpj_lookup_error": "CNPJ deve ter 14 dígitos"}
+
     async with httpx.AsyncClient(base_url=settings.brasilapi_url, timeout=10.0) as client:
         response = await client.get(f"/cnpj/v1/{digits}")
         if response.is_error:
-            return {"cnpj_lookup_error": response.text}
+            # Só o status: o corpo do erro é de um serviço externo e devolvê-lo
+            # ao cliente expõe detalhe de infraestrutura que não é nosso.
+            return {"cnpj_lookup_error": f"consulta de CNPJ falhou ({response.status_code})"}
         return {"company_data": response.json()}
