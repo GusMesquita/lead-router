@@ -27,8 +27,19 @@ class LeadResult(BaseModel):
     dispatched: bool
 
 
+class LeadAccepted(BaseModel):
+    """Resposta do 202: o lead entrou na fila, o resultado vem por GET /leads/{id}."""
+
+    id: str
+    status: str
+
+
 class LeadRecordOut(BaseModel):
-    """API-facing view of a persisted LeadRecord (app/db/models.py)."""
+    """API-facing view of a persisted LeadRecord (app/db/models.py).
+
+    `score` e `reasoning` são nulos enquanto `status == "pending"` — o worker
+    ainda não rodou. Não é campo opcional, é campo que ainda não existe.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -36,7 +47,10 @@ class LeadRecordOut(BaseModel):
     name: str
     email: str
     company: str | None
-    score: int
-    reasoning: str
+    status: str
+    score: int | None
+    reasoning: str | None
     dispatched: bool
+    error: str | None
     created_at: datetime
+    updated_at: datetime

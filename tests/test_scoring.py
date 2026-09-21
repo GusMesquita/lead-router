@@ -122,27 +122,37 @@ async def test_cliente_anthropic_e_reaproveitado(fake):
 
 
 @pytest.mark.asyncio
-async def test_falha_de_scoring_vira_502_e_nao_500(fake, monkeypatch):
-    """500 é bug nosso; 502 diz ao cliente que o problema é upstream e repetível."""
-    from httpx import ASGITransport, AsyncClient
-
-    import app.main as main_module
-    from app.config import settings
-    from app.main import app
-
-    monkeypatch.setattr(settings, "rate_limit_per_minute", 0)
+async def test_falha_de_scoring_marca_o_lead_como_failed(fake, monkeypatch):
+    """Com o POST assíncrono, a falha não tem para quem voltar: quem submeteu já
+    recebeu 202. Então ela fica registrada no lead, e o lead **não** ganha um
+    score falso — `score` continua nulo e `status` vira `failed`.
+    """
+    import app.worker as worker_module
+    from app.db.models import LeadStatus
+    from app.db.session import get_session
+    from app.models import LeadIn
+    from app.repository import create_pending, get_lead
+    from app.scoring import ScoringError
 
     async def enrich_vazio(lead):
         return {}
 
-    monkeypatch.setattr(main_module, "enrich", enrich_vazio)
+    monkeypatch.setattr(worker_module, "enrich", enrich_vazio)
     fake.blocos = [Bloco("text", text="sem tool use")]
 
-    transport = ASGITransport(app=app, raise_app_exceptions=False)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resposta = await client.post(
-            "/leads/ingest", json={"name": "Fulano", "email": "fulano@exemplo.com"}
+    async for session in get_session():
+        record, _ = await create_pending(
+            session, LeadIn(name="Fulano", email="fulano@exemplo.com"), idempotency_key=None
         )
+        break
 
-    assert resposta.status_code == 502
-    assert "não foi possível pontuar" in resposta.json()["detail"]
+    with pytest.raises(ScoringError):
+        await worker_module.process_lead({}, record.id)
+
+    async for session in get_session():
+        depois = await get_lead(session, record.id)
+        break
+
+    assert depois.status == LeadStatus.FAILED
+    assert depois.score is None
+    assert depois.error == "ScoringError"
