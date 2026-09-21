@@ -1,29 +1,19 @@
 import pytest
-import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-import app.main as main_module
-from app.db.session import get_session, init_db
+from app.db.session import get_session
 from app.main import app
-from app.models import LeadIn, LeadResult
-
-
-@pytest_asyncio.fixture(autouse=True)
-async def _init_db():
-    await init_db()
+from app.models import LeadIn
+from app.repository import create_pending, mark_done
 
 
 @pytest.mark.asyncio
-async def test_get_leads_returns_previously_saved_lead(monkeypatch):
+async def test_get_leads_returns_previously_saved_lead():
     async for session in get_session():
-        result = LeadResult(
-            lead=LeadIn(name="Bia", email="bia@exemplo.com"),
-            enrichment={},
-            score=42,
-            reasoning="test seed",
-            dispatched=False,
+        record, _ = await create_pending(
+            session, LeadIn(name="Bia", email="bia@exemplo.com"), idempotency_key=None
         )
-        await main_module.save_result(session, result)
+        await mark_done(session, record, score=42, reasoning="test seed", dispatched=False)
         break
 
     transport = ASGITransport(app=app)
