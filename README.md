@@ -99,15 +99,17 @@ uv run arq app.worker.WorkerSettings         # worker, noutro terminal
 Sem o worker de pé o lead fica em `pending` para sempre: a API aceita e enfileira, mas ninguém consome.
 
 ```bash
+export API_KEY=...   # uma das chaves de API_KEYS
+
 curl -X POST localhost:8000/leads/ingest \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: sua-chave" \
+  -H "X-API-Key: $API_KEY" \
   -H "Idempotency-Key: form-2026-09-21-ana" \
   -d '{"name": "Ana", "email": "ana@exemplo.com", "cnpj": "19131243000197", "message": "Quero uma demo esta semana"}'
 # → 202 {"id": "...", "status": "pending"}
 
-curl localhost:8000/leads/<id> -H "X-API-Key: sua-chave"
-curl localhost:8000/leads -H "X-API-Key: sua-chave"
+curl localhost:8000/leads/<id> -H "X-API-Key: $API_KEY"
+curl localhost:8000/leads -H "X-API-Key: $API_KEY"
 ```
 
 Ou via Docker:
