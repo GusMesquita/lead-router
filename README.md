@@ -45,7 +45,9 @@ Cada camada tem uma responsabilidade e não pula a próxima: rotas não montam S
 
 ## Autenticação
 
-`/leads/ingest` e `/leads` exigem o header `X-API-Key`. As chaves aceitas vêm de `API_KEYS` (uma string separada por vírgula) — se `API_KEYS` estiver vazio, a autenticação fica **desabilitada** (conveniente para rodar local, nunca aceitável em produção). Ver `app/auth.py`.
+`/leads/ingest` e `/leads` exigem o header `X-API-Key`. As chaves aceitas vêm de `API_KEYS` (string separada por vírgula).
+
+O comportamento é **fail-closed**: com `ENVIRONMENT=prod` (o default) e `API_KEYS` vazio, o app **não sobe** — levanta `RuntimeError` na inicialização. Antes ele subia com a autenticação silenciosamente desligada, que é a pior combinação possível: parece funcionando e está aberto. Para rodar local sem chave, use `ENVIRONMENT=dev` explicitamente. Ver `app/auth.py`.
 
 É autenticação de serviço-para-serviço (API key), não login de usuário: quem chama este serviço são webhooks, n8n, ou outro backend — não um navegador com sessão. Um shared secret no header é a ferramenta certa aqui; JWT/cookies de sessão seriam a ferramenta errada para uma API máquina-a-máquina.
 

@@ -6,7 +6,7 @@ SPA React + TypeScript que lista os leads processados pelo backend (`GET /leads`
 
 ```bash
 npm install
-cp .env.example .env   # VITE_API_URL e VITE_API_KEY, se a auth estiver ativa no backend
+cp .env.example .env   # VITE_API_URL
 npm run dev
 ```
 
