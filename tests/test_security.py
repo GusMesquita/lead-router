@@ -217,3 +217,19 @@ async def test_cnpj_malformado_nao_chama_a_brasilapi(cnpj, monkeypatch):
     )
 
     assert resultado == {"cnpj_lookup_error": "CNPJ deve ter 14 dígitos"}
+
+
+@pytest.mark.asyncio
+async def test_brasilapi_fora_do_ar_nao_derruba_a_ingestao(monkeypatch):
+    """O enriquecimento é opcional: a falha dele não pode custar o lead."""
+
+    async def estoura(self, url, **kwargs):
+        raise httpx.ConnectTimeout("sem resposta")
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", estoura)
+
+    resultado = await enrichment.enrich(
+        LeadIn(name="Fulano", email="fulano@exemplo.com", cnpj="19131243000197")
+    )
+
+    assert resultado["cnpj_lookup_error"].startswith("consulta de CNPJ indisponível")
