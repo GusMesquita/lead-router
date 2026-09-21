@@ -2,20 +2,22 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Query
+from fastapi import Depends, FastAPI, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_api_key, verify_auth_config
 from app.config import settings
 from app.db.session import get_session, init_db
 from app.dispatch import dispatch, verify_webhook_config
+from app.enrichment import aclose as close_enrichment_client
 from app.enrichment import enrich
 from app.logging_config import configure_logging, mask_email
 from app.models import LeadIn, LeadRecordOut, LeadResult
 from app.ratelimit import rate_limit
 from app.repository import list_leads, save_result
-from app.scoring import score
+from app.scoring import ScoringError, score
 
 logger = logging.getLogger("lead_router.api")
 
@@ -30,6 +32,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     verify_webhook_config()
     await init_db()
     yield
+    await close_enrichment_client()
 
 
 app = FastAPI(title="lead-router", lifespan=lifespan)
@@ -43,6 +46,20 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type", "X-API-Key"],
 )
+
+
+@app.exception_handler(ScoringError)
+async def scoring_error_handler(request: Request, exc: ScoringError) -> JSONResponse:
+    """502, não 500: quem falhou foi o serviço de cima, e o cliente pode repetir.
+
+    O detalhe do erro fica no log; a resposta não repassa texto de um serviço
+    externo para quem chamou.
+    """
+    logger.warning("scoring falhou", extra={"motivo": str(exc)})
+    return JSONResponse(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        content={"detail": "não foi possível pontuar o lead agora; tente de novo"},
+    )
 
 
 @app.get("/health")
