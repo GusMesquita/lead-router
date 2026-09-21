@@ -35,7 +35,10 @@ interface Auth13Props {
   fields?: AuthField[];
   labels?: {
     divider?: string;
-    terms?: string;
+    // ReactNode, não string de HTML: a versão do registry injetava isto com
+    // dangerouslySetInnerHTML, o que transforma qualquer label vinda de fora
+    // (i18n, CMS, query string) em XSS. Link é elemento, não texto.
+    terms?: React.ReactNode;
     submit?: string;
     passwordToggle?: string;
   };
@@ -88,8 +91,12 @@ export const auth13Demo: Auth13Props = {
   ],
   labels: {
     divider: "or sign up with email",
-    terms:
-      'I agree to the <a href="https://beste.co">Terms of Service</a> and <a href="https://beste.co">Privacy Policy</a>',
+    terms: (
+      <>
+        I agree to the <a href="https://beste.co">Terms of Service</a> and{" "}
+        <a href="https://beste.co">Privacy Policy</a>
+      </>
+    ),
     submit: "Create account",
     passwordToggle: "Toggle password visibility",
   },
@@ -205,8 +212,9 @@ export function Auth13({
                   <FieldLabel
                     htmlFor={`${fieldId}-terms`}
                     className="font-normal text-muted-foreground [&_a]:font-medium [&_a]:text-foreground [&_a]:underline"
-                    dangerouslySetInnerHTML={{ __html: termsLabel }}
-                  />
+                  >
+                    {termsLabel}
+                  </FieldLabel>
                 </Field>
               )}
 
