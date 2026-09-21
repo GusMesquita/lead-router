@@ -19,12 +19,16 @@ export class ApiError extends Error {
 }
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
-const API_KEY = import.meta.env.VITE_API_KEY ?? "";
 
+// Sem chave de API aqui, de propósito. Tudo que passa por import.meta.env.VITE_*
+// é inlinado no bundle em build time e fica legível para qualquer visitante —
+// enviar o segredo do serviço daqui seria publicá-lo.
+//
+// Este dashboard fala com um backend em ENVIRONMENT=dev, onde a auth está
+// desligada. Para apontar para uma instância autenticada, a chamada precisa
+// sair de um servidor: é o BFF (Route Handler do Next) previsto na Fatia 5.
 async function request<T>(path: string): Promise<T> {
-  const response = await fetch(`${BASE_URL}${path}`, {
-    headers: API_KEY ? { "X-API-Key": API_KEY } : {},
-  });
+  const response = await fetch(`${BASE_URL}${path}`);
   if (!response.ok) {
     throw new ApiError(response.status, `${path} failed with ${response.status}`);
   }

@@ -32,7 +32,7 @@ function App() {
 
       {error && (
         <p className="rounded-2xl border border-danger/40 bg-surface-raised px-4 py-3 text-sm text-danger">
-          Falha ao carregar leads: {error}. Verifique VITE_API_URL/VITE_API_KEY em .env.
+          Falha ao carregar leads: {error}. Verifique VITE_API_URL em .env.
         </p>
       )}
 
