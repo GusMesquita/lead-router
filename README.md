@@ -25,7 +25,7 @@ POST /leads/ingest (requer X-API-Key)
            lead vira `done` (ou `failed`, com a classe do erro)
 
 GET /leads/{id} (requer X-API-Key) → status e resultado daquele lead
-GET /leads      (requer X-API-Key) → histórico paginado, consumido pelo dashboard em frontend/
+GET /leads      (requer X-API-Key) → histórico paginado, consumido pelo dashboard em web/
 ```
 
 ## Por que existe
@@ -119,9 +119,26 @@ docker build -t lead-router .
 docker run -p 8000:8000 --env-file .env lead-router
 ```
 
-## Dashboard (frontend)
+## Dashboard (web)
 
-Veja [frontend/](./frontend) — SPA React que lista os leads processados e seus scores, consumindo `GET /leads`.
+[web/](./web) — app Next.js (App Router, shadcn/ui, Tailwind 4) que lista os leads,
+filtra por faixa de pontuação e mostra quem ainda está `pending`.
+
+```bash
+cd web
+pnpm install
+cp .env.example .env.local   # LEAD_ROUTER_URL e, se a API exigir, LEAD_ROUTER_API_KEY
+pnpm dev
+```
+
+A busca acontece num **Server Component**: a chave fica no servidor e o browser
+recebe só os leads. `lib/lead-api.ts` importa `server-only`, então um import
+distraído a partir de um Client Component vira **erro de build** em vez de
+segredo no bundle. O CI reforça isso construindo com uma chave-canário e
+falhando se ela aparecer em `.next/static`.
+
+- `/` — dashboard de leads
+- `/design-system` — os componentes em uma página só
 
 ## Integrações
 
