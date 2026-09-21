@@ -1,0 +1,11 @@
+# Herda todas as regras padrão; só acrescenta exceções.
+[extend]
+useDefault = true
+
+[[rules]]
+id = "curl-auth-header"
+[rules.allowlist]
+# Exemplo de curl em documentação não é segredo: o valor é um placeholder, e a
+# regra casa com qualquer coisa depois de "X-API-Key:". Restrito a README para
+# que a regra continue valendo em código, config e workflows.
+paths = ['''(^|/)README\.md$''']
