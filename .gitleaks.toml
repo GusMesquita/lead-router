@@ -2,10 +2,12 @@
 [extend]
 useDefault = true
 
-[[rules]]
-id = "curl-auth-header"
-[rules.allowlist]
-# Exemplo de curl em documentação não é segredo: o valor é um placeholder, e a
-# regra casa com qualquer coisa depois de "X-API-Key:". Restrito a README para
-# que a regra continue valendo em código, config e workflows.
-paths = ['''(^|/)README\.md$''']
+[allowlist]
+description = "Placeholders de documentação, não segredos"
+# A regra curl-auth-header casa com qualquer valor depois de "X-API-Key:",
+# inclusive o exemplo do README. A exceção é pelo valor exato, não pelo arquivo:
+# assim um segredo de verdade no README continua sendo pego.
+regexes = [
+  '''^\$API_KEY$''',
+  '''^sua-chave$''',
+]
