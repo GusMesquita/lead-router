@@ -1,0 +1,21 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry.json",
+  "name": "gmui",
+  "homepage": "https://github.com/GusMesquita",
+  "items": [
+    {
+      "name": "api-error-card",
+      "type": "registry:component",
+      "title": "API error card",
+      "description": "Estado de falha que obriga quem usa a escrever o próximo passo, em vez de só informar que algo quebrou.",
+      "registryDependencies": ["card"],
+      "files": [
+        {
+          "path": "registry/gmui/api-error-card.tsx",
+          "type": "registry:component",
+          "target": "components/gmui/api-error-card.tsx"
+        }
+      ]
+    }
+  ]
+}

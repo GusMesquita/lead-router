@@ -1,0 +1,33 @@
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "base-rhea",
+  "rsc": true,
+  "tsx": true,
+  "tailwind": {
+    "config": "",
+    "css": "app/globals.css",
+    "baseColor": "neutral",
+    "cssVariables": true,
+    "prefix": ""
+  },
+  "iconLibrary": "phosphor",
+  "rtl": false,
+  "aliases": {
+    "components": "@/components",
+    "utils": "@/lib/utils",
+    "ui": "@/components/ui",
+    "lib": "@/lib",
+    "hooks": "@/hooks"
+  },
+  "menuColor": "default",
+  "menuAccent": "subtle",
+  "registries": {
+    "@7ovr": "https://7ovr.com/r/{name}.json",
+    "@abui": "https://abui.io/r/{name}.json",
+    "@arc": "https://witharc.co/r/{name}.json",
+    "@akoder": "https://akoder.xyz/r/{name}.json",
+    "@bjork-ui": "https://ui.isaiahbjork.com/{name}.json",
+    "@blocks-so": "https://blocks.so/r/{name}.json",
+    "@bundui": "https://bundui.io/r/{name}.json"
+  }
+}

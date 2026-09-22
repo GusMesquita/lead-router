@@ -1,0 +1,18 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "api-error-card",
+  "title": "API error card",
+  "description": "Estado de falha que obriga quem usa a escrever o próximo passo, em vez de só informar que algo quebrou.",
+  "registryDependencies": [
+    "card"
+  ],
+  "files": [
+    {
+      "path": "registry/gmui/api-error-card.tsx",
+      "content": "import type { ReactNode } from \"react\"\n\nimport {\n  Card,\n  CardContent,\n  CardDescription,\n  CardHeader,\n  CardTitle,\n} from \"@/components/ui/card\"\n\n// Um estado de erro que só diz \"falhou\" deixa o leitor sem próximo passo — e\n// em dev o próximo passo é quase sempre \"sua API não está no ar\". Por isso\n// `children` não é opcional: quem usa este card é obrigado a escrever a saída.\nexport function ApiErrorCard({\n  title = \"Sem resposta da API\",\n  detail,\n  children,\n}: {\n  title?: string\n  // A mensagem técnica; útil para distinguir 401 de conexão recusada.\n  detail: string\n  // O que fazer a respeito.\n  children: ReactNode\n}) {\n  return (\n    <Card role=\"alert\">\n      <CardHeader>\n        <CardTitle>{title}</CardTitle>\n        <CardDescription>{detail}</CardDescription>\n      </CardHeader>\n      <CardContent className=\"text-muted-foreground text-sm\">{children}</CardContent>\n    </Card>\n  )\n}\n",
+      "type": "registry:component",
+      "target": "components/gmui/api-error-card.tsx"
+    }
+  ],
+  "type": "registry:component"
+}

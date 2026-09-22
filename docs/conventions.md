@@ -33,8 +33,10 @@ Este documento é auto-contido: não depende de nenhum outro repositório.
   Não é JWT nem cookie — são chamadas serviço-a-serviço, não sessões de navegador.
 - **Fail-closed**: com `ENVIRONMENT=prod`, o app **não sobe** sem `API_KEYS` configurado.
   Autenticação desligada é um modo explícito de desenvolvimento, nunca um default silencioso.
-- **Nenhum segredo chega ao browser.** O frontend nunca carrega a API key; toda chamada
-  autenticada passa pelo servidor do Next.
+- **Nenhum segredo chega ao browser.** A chamada autenticada sai de um Server Component, e
+  `web/lib/lead-api.ts` importa `server-only`: importá-lo de um Client Component quebra o
+  build. Variável sem prefixo `NEXT_PUBLIC_` não existe no browser, e o CI confirma
+  construindo com uma chave-canário e falhando se ela aparecer em `.next/static`.
 - **O modelo nunca vê segredos nem infraestrutura.** O LLM pontua intenção de compra e não
   recebe destino de dispatch, chaves nem credenciais.
 - **Entrada não confiável é tratada como dado, não instrução.** O texto submetido pelo lead
