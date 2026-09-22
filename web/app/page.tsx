@@ -2,14 +2,10 @@ import Link from "next/link"
 
 import { LeadsPanel } from "@/components/leads/leads-panel"
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
 import { fetchLeads } from "@/lib/lead-api"
+// Importado da registry, não de uma cópia: assim um item quebrado derruba o
+// build deste app antes de chegar a quem faz `shadcn add @gmui/api-error-card`.
+import { ApiErrorCard } from "@/registry/gmui/api-error-card"
 import type { LeadRecord } from "@/lib/leads"
 
 // Server Component: o fetch e a chave ficam no servidor. Nenhum Route Handler
@@ -41,17 +37,11 @@ export default async function Page() {
       </header>
 
       {falha ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Sem resposta da API</CardTitle>
-            <CardDescription>{falha}</CardDescription>
-          </CardHeader>
-          <CardContent className="text-muted-foreground text-sm">
-            Suba a pilha com <code>docker compose up</code> na raiz do
-            repositório, ou aponte <code>LEAD_ROUTER_URL</code> para uma
-            instância existente.
-          </CardContent>
-        </Card>
+        <ApiErrorCard detail={falha}>
+          Suba a pilha com <code>docker compose up</code> na raiz do
+          repositório, ou aponte <code>LEAD_ROUTER_URL</code> para uma
+          instância existente.
+        </ApiErrorCard>
       ) : (
         <LeadsPanel leads={leads} />
       )}

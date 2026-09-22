@@ -38,6 +38,30 @@ lintá-los só produz ruído que some no próximo `shadcn add`.
 pnpm dlx shadcn@latest add <componente>
 ```
 
+## A registry `@gmui`
+
+Este app **hospeda** a registry do portfólio: a fonte fica em `registry/gmui/`,
+`pnpm registry:build` gera `public/r/*.json` e o Next serve os arquivos.
+
+```jsonc
+// components.json do consumidor
+"registries": {
+  "@gmui": "https://raw.githubusercontent.com/GusMesquita/lead-router/main/web/public/r/{name}.json"
+}
+```
+
+```bash
+pnpm dlx shadcn@latest add @gmui/api-error-card
+```
+
+O critério para um componente entrar é estreito: **dois apps já o duplicam**.
+Hoje isso vale para um item só. Um tema `@gmui` não entrou porque republicaria
+os tokens neutros que o shadcn já entrega.
+
+Este app importa o item de `@/registry/gmui/...`, não de uma cópia — assim um
+componente quebrado derruba o build daqui antes de chegar a quem instala. O CI
+roda `registry:build` e falha se `public/r/` estiver desatualizado.
+
 ## Verificação
 
 ```bash
