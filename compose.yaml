@@ -1,0 +1,52 @@
+# Sobe a pilha inteira: fila, API e worker. A API sozinha aceita leads mas nunca
+# os processa — por isso o worker é serviço, não um extra opcional.
+services:
+  redis:
+    image: redis:8-alpine
+    # Sem porta publicada: quem fala com o Redis é a rede interna do compose.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    # Migração antes de servir: o schema é do Alembic, não de create_all.
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment: &app_env
+      ENVIRONMENT: ${ENVIRONMENT:-dev}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      API_KEYS: ${API_KEYS:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-60}
+      OUTBOUND_WEBHOOK_URL: ${OUTBOUND_WEBHOOK_URL:-}
+      WEBHOOK_ALLOWED_HOSTS: ${WEBHOOK_ALLOWED_HOSTS:-}
+      WEBHOOK_SIGNING_SECRET: ${WEBHOOK_SIGNING_SECRET:-}
+      MIN_SCORE_TO_DISPATCH: ${MIN_SCORE_TO_DISPATCH:-60}
+      REDIS_URL: redis://redis:6379
+      # Arquivo único no volume compartilhado: API e worker enxergam o mesmo
+      # banco. Em produção troque por postgresql+asyncpg:// e nada mais muda.
+      DATABASE_URL: sqlite+aiosqlite:////data/lead_router.db
+    volumes:
+      - lead_data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: .
+    command: arq app.worker.WorkerSettings
+    environment: *app_env
+    volumes:
+      - lead_data:/data
+    depends_on:
+      api:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+volumes:
+  lead_data:

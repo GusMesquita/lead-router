@@ -2,22 +2,20 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Query, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_api_key, verify_auth_config
 from app.config import settings
-from app.db.session import get_session, init_db
-from app.dispatch import dispatch, verify_webhook_config
-from app.enrichment import aclose as close_enrichment_client
-from app.enrichment import enrich
+from app.db.session import get_session
+from app.dispatch import verify_webhook_config
 from app.logging_config import configure_logging, mask_email
-from app.models import LeadIn, LeadRecordOut, LeadResult
+from app.models import LeadAccepted, LeadIn, LeadRecordOut
+from app.queue import aclose as close_queue
+from app.queue import enqueue_lead
 from app.ratelimit import rate_limit
-from app.repository import list_leads, save_result
-from app.scoring import ScoringError, score
+from app.repository import create_pending, get_lead, list_leads
 
 logger = logging.getLogger("lead_router.api")
 
@@ -30,9 +28,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # para um destino não verificado.
     verify_auth_config()
     verify_webhook_config()
-    await init_db()
     yield
-    await close_enrichment_client()
+    await close_queue()
 
 
 app = FastAPI(title="lead-router", lifespan=lifespan)
@@ -48,20 +45,6 @@ app.add_middleware(
 )
 
 
-@app.exception_handler(ScoringError)
-async def scoring_error_handler(request: Request, exc: ScoringError) -> JSONResponse:
-    """502, não 500: quem falhou foi o serviço de cima, e o cliente pode repetir.
-
-    O detalhe do erro fica no log; a resposta não repassa texto de um serviço
-    externo para quem chamou.
-    """
-    logger.warning("scoring falhou", extra={"motivo": str(exc)})
-    return JSONResponse(
-        status_code=status.HTTP_502_BAD_GATEWAY,
-        content={"detail": "não foi possível pontuar o lead agora; tente de novo"},
-    )
-
-
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok"}
@@ -69,34 +52,49 @@ async def health() -> dict:
 
 @app.post(
     "/leads/ingest",
-    response_model=LeadResult,
+    response_model=LeadAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
     dependencies=[Depends(require_api_key), Depends(rate_limit)],
 )
-async def ingest_lead(lead: LeadIn, session: AsyncSession = Depends(get_session)) -> LeadResult:
-    enrichment = await enrich(lead)
-    lead_score, reasoning = await score(lead, enrichment)
+async def ingest_lead(
+    lead: LeadIn,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", max_length=200),
+    session: AsyncSession = Depends(get_session),
+) -> LeadAccepted:
+    """Aceita o lead e devolve 202 — enriquecer e pontuar acontece no worker.
 
-    result = LeadResult(
-        lead=lead,
-        enrichment=enrichment,
-        score=lead_score,
-        reasoning=reasoning,
-        dispatched=False,
-    )
-    result.dispatched = await dispatch(result)
-    await save_result(session, result)
+    Fazer isso aqui dentro amarrava a resposta a dois serviços externos
+    (BrasilAPI e Anthropic): quem preencheu o formulário esperava segundos, e
+    uma indisponibilidade deles virava erro para o lead. Agora o POST só grava e
+    enfileira; o resultado sai por GET /leads/{id}.
+    """
+    record, created = await create_pending(session, lead, idempotency_key=idempotency_key)
 
-    # E-mail mascarado e nenhum trecho de `message`: o conteúdo é entrada
-    # pública e não tem por que ficar retido no agregador de logs.
+    if created:
+        # Depois do commit, nunca antes: se enfileirássemos primeiro, o worker
+        # poderia procurar um lead que ainda não existe no banco.
+        await enqueue_lead(record.id)
+
     logger.info(
-        "lead processado",
-        extra={
-            "email": mask_email(lead.email),
-            "score": lead_score,
-            "dispatched": result.dispatched,
-        },
+        "lead aceito",
+        extra={"lead_id": record.id, "email": mask_email(lead.email), "novo": created},
     )
-    return result
+    return LeadAccepted(id=record.id, status=record.status)
+
+
+@app.get(
+    "/leads/{lead_id}",
+    response_model=LeadRecordOut,
+    dependencies=[Depends(require_api_key), Depends(rate_limit)],
+)
+async def read_lead(
+    lead_id: str = Path(max_length=64),
+    session: AsyncSession = Depends(get_session),
+) -> LeadRecordOut:
+    record = await get_lead(session, lead_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="lead não encontrado")
+    return LeadRecordOut.model_validate(record)
 
 
 @app.get(

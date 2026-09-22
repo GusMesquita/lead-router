@@ -1,0 +1,13 @@
+# Herda todas as regras padrão; só acrescenta exceções.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Placeholders de documentação, não segredos"
+# A regra curl-auth-header casa com qualquer valor depois de "X-API-Key:",
+# inclusive o exemplo do README. A exceção é pelo valor exato, não pelo arquivo:
+# assim um segredo de verdade no README continua sendo pego.
+regexes = [
+  '''^\$API_KEY$''',
+  '''^sua-chave$''',
+]

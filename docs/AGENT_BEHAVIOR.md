@@ -28,17 +28,40 @@ reading a log — is entitled to assume about that decision.
   scores across calls. Do not build logic downstream that assumes score is
   stable for the same input — treat it as an opinion, not a computation.
 
+## Onde a pontuação acontece
+
+A pontuação roda no **worker** (`app/worker.py`), não no caminho da requisição.
+`POST /leads/ingest` devolve **202** com um `id` e status `pending`; o resultado
+aparece em `GET /leads/{id}` quando o worker termina. Quem submeteu o formulário
+nunca espera uma chamada de LLM.
+
+Consequência para quem consome: `score` e `reasoning` são **nulos enquanto
+`status == "pending"`**. Não é campo opcional, é campo que ainda não existe.
+
 ## Failure mode by design
 
-Um lead que falha na pontuação derruba o `/leads/ingest` inteiro — não é
-silenciosamente gravado com score 0. Isso mantém a tabela `leads` livre de uma
+Um lead que falha na pontuação **não** é gravado com score 0. `status` vira
+`failed`, `score` continua nulo, e o campo `error` traz só a **classe** do erro —
+nunca a mensagem crua de um serviço externo, que pode carregar trecho do payload
+ou de uma URL interna e sai na API. Isso mantém a tabela `leads` livre de uma
 categoria "score falso" que precisaria ser filtrada em todo lugar depois.
 
-A resposta é **502**, não 500: quem falhou foi o serviço de cima e o cliente
-pode repetir. O motivo fica no log; a resposta não repassa texto de serviço
-externo.
+A exceção sobe do worker de propósito: é ela que faz o arq retentar o job
+(`max_tries = 3`). Falha de rede em BrasilAPI ou Anthropic costuma ser
+transitória.
 
 O **enriquecimento** segue a regra oposta, de propósito: ele é opcional, então
 BrasilAPI fora do ar ou CNPJ malformado viram um campo `cnpj_lookup_error` no
 resultado e o lead é processado assim mesmo. Perder o enriquecimento não pode
 custar o lead.
+
+## Idempotência
+
+`Idempotency-Key` no header faz o replay devolver o **mesmo** `id` sem criar
+outro lead e sem enfileirar outro job — cada job custa uma chamada ao LLM. A
+garantia é um índice único no banco, não uma checagem em memória: duas
+requisições simultâneas com a mesma chave não conseguem criar dois leads.
+
+O worker tem a sua própria trava: um lead que já saiu de `pending` não é
+repontuado, para que uma reentrega do arq depois de um crash não sobrescreva um
+resultado bom nem gaste outro LLM.
