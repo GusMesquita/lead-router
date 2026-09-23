@@ -17,3 +17,7 @@ dist/
 
 # SO
 .DS_Store
+
+# AI tooling local state
+.claude/
+graphify-out/
