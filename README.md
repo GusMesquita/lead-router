@@ -1,106 +1,55 @@
 # lead-router
 
-Motor genérico de ingestão, enriquecimento, pontuação e roteamento de leads. Recebe um lead via webhook, decide se vale a pena (com um LLM), persiste o resultado, e despacha pra onde você quiser — sem lógica de negócio de nenhum CRM específico embutida.
+Motor genérico de ingestão, enriquecimento, pontuação e roteamento de leads. Recebe um lead via webhook, decide com um LLM se ele vale a pena, persiste o resultado e despacha para um webhook configurável (Slack, n8n, CRM) — sem lógica de nenhum CRM específico embutida.
 
-A ingestão é **assíncrona**: o POST grava e enfileira, e o trabalho caro roda num worker.
+Não é um CRM: é a peça que decide **o que fazer** com um lead antes de ele chegar a um.
+
+## Fluxo
 
 ```
-POST /leads/ingest (requer X-API-Key)
-        │
-        ├──▶ grava o lead como `pending` ──▶ 202 { id, status }
-        │
-        ▼
-   fila (Redis / arq)
-        │
-        ▼
-   worker: enrichment (CNPJ via BrasilAPI / brasilapi-mcp-server)
-        │
-        ▼
-           scoring (Claude Haiku — 0 a 100)   ── ver docs/AGENT_BEHAVIOR.md
-        │
-        ▼
-           dispatch (webhook configurável — Slack, n8n, CRM, o que for)
-        │
-        ▼
-           lead vira `done` (ou `failed`, com a classe do erro)
+POST /leads/ingest ──▶ grava `pending` ──▶ enfileira (Redis/arq) ──▶ 202 { id, status }
+                                                  │
+                                                  ▼
+                 worker: enriquecimento (CNPJ via BrasilAPI, opcional)
+                         → pontuação (Claude, 0-100, via tool use)
+                         → dispatch (webhook com allowlist e assinatura HMAC)
+                         → `done` ou `failed`
 
-GET /leads/{id} (requer X-API-Key) → status e resultado daquele lead
-GET /leads      (requer X-API-Key) → histórico paginado, consumido pelo dashboard em web/
+GET /leads/{id} → status e resultado     GET /leads → histórico paginado (usado por web/)
 ```
 
-## Por que existe
-
-Toda automação de "lead chegou, qualifica e manda pra algum lugar" repete essa mesma forma. Este projeto isola essa forma como um serviço reutilizável, plugável em qualquer stack via webhook — não é um CRM, é a peça que decide **o que fazer** com um lead antes dele chegar num CRM.
-
-## Arquitetura
+O POST não espera o LLM: `score` e `reasoning` ficam nulos enquanto o lead está `pending`. Retry, idempotência, falhas de entrega e limites aceitos estão em **[docs/processing-contract.md](docs/processing-contract.md)**.
 
 ```
 app/
-├── main.py         # rotas HTTP — sem lógica de negócio
-├── auth.py         # dependência de autenticação (X-API-Key)
-├── config.py       # settings via env (pydantic-settings)
-├── models.py       # schemas Pydantic de entrada/saída da API
-├── enrichment.py   # busca dados externos (BrasilAPI)
-├── scoring.py       # chamada ao LLM — único lugar com decisão de IA
-├── dispatch.py      # envia resultado pro destino configurado
-├── repository.py    # única camada que fala SQL
-└── db/
-    ├── models.py     # entidades SQLModel (schema do banco)
-    └── session.py    # engine/sessão async
+├── main.py            # rotas HTTP e ingestão (grava + enfileira)
+├── worker.py          # job do arq: enrich → score → dispatch
+├── queue.py           # pool Redis e enqueue
+├── enrichment.py      # BrasilAPI
+├── scoring.py         # único lugar com decisão de IA
+├── dispatch.py        # webhook de saída
+├── repository.py      # único lugar com SQL
+├── auth.py, ratelimit.py, config.py, logging_config.py, models.py
+└── db/                # entidades SQLModel e sessão async
+alembic/               # dono do schema
+web/                   # dashboard Next.js e catálogo de componentes
 ```
-
-Cada camada tem uma responsabilidade e não pula a próxima: rotas não montam SQL, o repositório não sabe nada sobre HTTP, o scoring não sabe nada sobre persistência.
-
-## Autenticação
-
-`/leads/ingest` e `/leads` exigem o header `X-API-Key`. As chaves aceitas vêm de `API_KEYS` (string separada por vírgula).
-
-O comportamento é **fail-closed**: com `ENVIRONMENT=prod` (o default) e `API_KEYS` vazio, o app **não sobe** — levanta `RuntimeError` na inicialização. Antes ele subia com a autenticação silenciosamente desligada, que é a pior combinação possível: parece funcionando e está aberto. Para rodar local sem chave, use `ENVIRONMENT=dev` explicitamente. Ver `app/auth.py`.
-
-É autenticação de serviço-para-serviço (API key), não login de usuário: quem chama este serviço são webhooks, n8n, ou outro backend — não um navegador com sessão. Um shared secret no header é a ferramenta certa aqui; JWT/cookies de sessão seriam a ferramenta errada para uma API máquina-a-máquina.
-
-## Por que 202 e não 200 com o resultado
-
-`enrich → score → dispatch` leva segundos e depende de dois serviços externos. Fazer isso dentro do POST amarrava a resposta a eles: qualquer lentidão da BrasilAPI ou da Anthropic virava timeout para quem preencheu o formulário, e um pico de leads abria uma chamada de LLM por requisição, sem controle nenhum.
-
-Agora o POST só grava e enfileira. O resultado sai em `GET /leads/{id}`, onde `score` e `reasoning` são **nulos enquanto `status == "pending"`** — não é campo opcional, é campo que ainda não existe.
-
-## Idempotência
-
-Mande `Idempotency-Key` no header e o replay devolve o **mesmo** `id`, sem criar outro lead e sem enfileirar outro job. Isso importa porque cada job custa uma chamada de LLM, e retry de formulário e reentrega de webhook são a regra, não a exceção.
-
-A garantia é um **índice único** no banco, não uma checagem em memória: duas requisições simultâneas com a mesma chave não conseguem criar dois leads — a que perde a corrida recebe o id da que ganhou.
-
-## Persistência e migrações
-
-Os leads vivem na tabela `leads` (SQLite por padrão via `DATABASE_URL=sqlite+aiosqlite:///./lead_router.db`; troque para Postgres apontando a mesma variável para `postgresql+asyncpg://...` sem mudar código).
-
-O schema é do **Alembic** — não existe `create_all` em lugar nenhum. Duas fontes de verdade para o mesmo schema é como o banco de produção fica diferente do que os testes exercitam; aqui os testes rodam as migrações de verdade (`tests/conftest.py`), então esquecer a migração quebra o CI.
-
-```bash
-uv run alembic upgrade head           # aplica
-uv run alembic revision --autogenerate -m "descrição"
-```
-
-A URL vem de `app/config.py`, nunca do `alembic.ini`.
 
 ## Rodando localmente
 
 ```bash
 uv sync
-cp .env.example .env   # preencha ANTHROPIC_API_KEY e API_KEYS
+cp .env.example .env              # ANTHROPIC_API_KEY; API_KEYS ou ENVIRONMENT=dev
 uv run alembic upgrade head
-docker run -d -p 6379:6379 redis:8-alpine   # a fila do worker
+docker run -d -p 6379:6379 redis:8-alpine
 
-uv run uvicorn app.main:app --reload        # API
-uv run arq app.worker.WorkerSettings         # worker, noutro terminal
+uv run uvicorn app.main:app --reload     # API
+uv run arq app.worker.WorkerSettings     # worker, noutro terminal
 ```
 
-Sem o worker de pé o lead fica em `pending` para sempre: a API aceita e enfileira, mas ninguém consome.
+Sem o worker o lead fica `pending` para sempre; sem o Redis o POST responde `503`.
 
 ```bash
-export API_KEY=...   # uma das chaves de API_KEYS
-
 curl -X POST localhost:8000/leads/ingest \
   -H "Content-Type: application/json" \
   -H "X-API-Key: $API_KEY" \
@@ -109,53 +58,64 @@ curl -X POST localhost:8000/leads/ingest \
 # → 202 {"id": "...", "status": "pending"}
 
 curl localhost:8000/leads/<id> -H "X-API-Key: $API_KEY"
-curl localhost:8000/leads -H "X-API-Key: $API_KEY"
 ```
 
-Ou via Docker:
+### Docker Compose
 
 ```bash
-docker build -t lead-router .
-docker run -p 8000:8000 --env-file .env lead-router
+docker compose up --build
 ```
 
-## Dashboard (web)
+Sobe Redis, API (em `127.0.0.1:8000`, rodando `alembic upgrade head` antes de servir) e worker, com o SQLite num volume compartilhado. As variáveis vêm do ambiente ou de `.env`. O container roda como usuário sem privilégio; um volume `lead_data` criado por uma versão antiga da imagem (como root) precisa de `docker compose down -v`.
 
-[web/](./web) — app Next.js (App Router, shadcn/ui, Tailwind 4) que lista os leads,
-filtra por faixa de pontuação e mostra quem ainda está `pending`.
+## Migrações
+
+O schema é do **Alembic**; não existe `create_all`. Os testes rodam as migrações de verdade, e o CI falha se os modelos divergirem delas. A URL vem de `app/config.py`, não do `alembic.ini`.
 
 ```bash
+uv run alembic upgrade head
+uv run alembic revision --autogenerate -m "descrição"
+uv run alembic check                  # modelos × migrações
+```
+
+## Dashboard (web/)
+
+Next.js com a chave da API só no servidor. Detalhes, rotas e a registry `@gmui` em [web/README.md](web/README.md).
+
+```bash
+nvm use                               # Node de .nvmrc (na primeira vez: nvm install)
+corepack enable                       # pnpm na versão do packageManager de web/package.json
 cd web
 pnpm install
-cp .env.example .env.local   # LEAD_ROUTER_URL e, se a API exigir, LEAD_ROUTER_API_KEY
+cp .env.example .env.local            # LEAD_ROUTER_URL, LEAD_ROUTER_API_KEY
 pnpm dev
 ```
 
-A busca acontece num **Server Component**: a chave fica no servidor e o browser
-recebe só os leads. `lib/lead-api.ts` importa `server-only`, então um import
-distraído a partir de um Client Component vira **erro de build** em vez de
-segredo no bundle. O CI reforça isso construindo com uma chave-canário e
-falhando se ela aparecer em `.next/static`.
-
-- `/` — dashboard de leads
-- `/design-system` — os componentes em uma página só
-
-## Integrações
-
-- **Enriquecimento**: usa a [BrasilAPI](https://brasilapi.com.br) diretamente por padrão; aponte `BRASILAPI_URL` para uma instância do `brasilapi-mcp-server` rodando em modo HTTP se preferir centralizar.
-- **Orquestração externa**: um workflow n8n pode chamar `/leads/ingest` como um HTTP Request node — veja `n8n-ai-cookbook`.
-- **Base de conhecimento**: para responder perguntas do lead automaticamente antes do roteamento, chame o `rag-starter-kit` como um passo extra.
-
-## Testes
+## Validação (o mesmo que o CI roda)
 
 ```bash
-uv sync --group dev
-uv run pytest
+uv sync --locked
 uv run ruff check .
+uv run ruff format --check .
+uv run pytest -q
+DATABASE_URL=sqlite+aiosqlite:////tmp/check.db sh -c 'uv run alembic upgrade head && uv run alembic check'
+
+cd web
+pnpm install --frozen-lockfile
+pnpm lint && pnpm typecheck && pnpm test
+pnpm registry:build && git diff --exit-code public/r
+pnpm build
+
+docker build -t lead-router .
 ```
 
-## Roadmap
+O Node vem de `.nvmrc` (mise lê `.mise.toml`, com a mesma versão); o pnpm, do `packageManager` de `web/package.json`, que o Corepack local e o `pnpm/action-setup` do CI leem.
 
-- [ ] Fila (ex: Redis) para lidar com picos de webhooks sem bloquear a resposta HTTP
-- [ ] Suporte a múltiplos destinos de dispatch simultâneos
-- [ ] Migrations com Alembic (hoje o schema é criado via `create_all` — ok para um starter kit, não para evolução de schema em produção)
+## Segurança e operação
+
+- **Autenticação fail-closed.** `/leads*` exigem `X-API-Key` (chaves em `API_KEYS`). Com `ENVIRONMENT=prod` (o default) e `API_KEYS` vazio, o app não sobe; para rodar sem chave, use `ENVIRONMENT=dev` explicitamente.
+- **Rate limit** por chave (ou IP) em memória, por réplica: `RATE_LIMIT_PER_MINUTE`.
+- **Webhook de saída** só em `https` e em host de `WEBHOOK_ALLOWED_HOSTS`, validado na subida da API e do worker; assinado com `WEBHOOK_SIGNING_SECRET` quando definido.
+- **Sem PII nem mensagem de erro externa em log ou no banco:** e-mail mascarado, `error` guarda só a classe da exceção.
+- **CORS** vazio por padrão: o dashboard chama a API pelo servidor. O CI constrói o `web/` com uma chave-canário e falha se ela aparecer no bundle do browser.
+- **CI** também roda gitleaks, `pip-audit` e `pnpm audit`.
