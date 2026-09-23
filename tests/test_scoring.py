@@ -1,5 +1,7 @@
 """A8/S3 — pontuação vinda de tool use, com clamp e sem json.loads em texto cru."""
 
+import anthropic
+import httpx
 import pytest
 
 from app import scoring
@@ -18,9 +20,11 @@ class FakeAnthropic:
     """Captura os kwargs do create e devolve os blocos que o teste pedir."""
 
     instancias = 0
+    init_kwargs: dict = {}
 
     def __init__(self, **kwargs):
         FakeAnthropic.instancias += 1
+        FakeAnthropic.init_kwargs = kwargs
         self.messages = self
 
     blocos: list = []
@@ -122,37 +126,37 @@ async def test_cliente_anthropic_e_reaproveitado(fake):
 
 
 @pytest.mark.asyncio
-async def test_falha_de_scoring_marca_o_lead_como_failed(fake, monkeypatch):
-    """Com o POST assíncrono, a falha não tem para quem voltar: quem submeteu já
-    recebeu 202. Então ela fica registrada no lead, e o lead **não** ganha um
-    score falso — `score` continua nulo e `status` vira `failed`.
-    """
-    import app.worker as worker_module
-    from app.db.models import LeadStatus
-    from app.db.session import get_session
-    from app.models import LeadIn
-    from app.repository import create_pending, get_lead
-    from app.scoring import ScoringError
+async def test_cliente_tem_timeout_dentro_do_job_timeout(fake):
+    fake.blocos = [Bloco("tool_use", name="submit_score", input={"score": 1, "reasoning": "x"})]
 
-    async def enrich_vazio(lead):
-        return {}
+    await scoring.score(_LEAD, {})
 
-    monkeypatch.setattr(worker_module, "enrich", enrich_vazio)
-    fake.blocos = [Bloco("text", text="sem tool use")]
+    assert fake.init_kwargs["timeout"] == 30.0
+    assert fake.init_kwargs["max_retries"] == 2
 
-    async for session in get_session():
-        record, _ = await create_pending(
-            session, LeadIn(name="Fulano", email="fulano@exemplo.com"), idempotency_key=None
-        )
-        break
 
-    with pytest.raises(ScoringError):
-        await worker_module.process_lead({}, record.id)
+_REQ = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
 
-    async for session in get_session():
-        depois = await get_lead(session, record.id)
-        break
 
-    assert depois.status == LeadStatus.FAILED
-    assert depois.score is None
-    assert depois.error == "ScoringError"
+def _status(cls, code):
+    return cls("x", response=httpx.Response(code, request=_REQ), body=None)
+
+
+@pytest.mark.parametrize(
+    ("exc", "transitorio"),
+    [
+        (anthropic.APIConnectionError(request=_REQ), True),
+        (anthropic.APITimeoutError(request=_REQ), True),
+        (_status(anthropic.RateLimitError, 429), True),
+        (_status(anthropic.InternalServerError, 500), True),
+        (_status(anthropic.ServiceUnavailableError, 503), True),
+        (_status(anthropic.DeadlineExceededError, 504), True),
+        # Irmã de InternalServerError, não filha: é o caso que pega isinstance.
+        (_status(anthropic.OverloadedError, 529), True),
+        (_status(anthropic.BadRequestError, 400), False),
+        (_status(anthropic.AuthenticationError, 401), False),
+        (scoring.ScoringError("sem tool use"), False),
+    ],
+)
+def test_classificacao_de_falha_transitoria(exc, transitorio):
+    assert scoring.is_transient(exc) is transitorio

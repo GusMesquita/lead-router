@@ -2,7 +2,7 @@
 
 import json
 
-from anthropic import AsyncAnthropic
+from anthropic import APIConnectionError, APIStatusError, AsyncAnthropic
 
 from app.config import settings
 from app.models import LeadIn
@@ -49,14 +49,33 @@ _MIN_SCORE, _MAX_SCORE = 0, 100
 _anthropic: AsyncAnthropic | None = None
 
 
+_TRANSIENT_STATUS = {408, 409, 429}
+
+
 class ScoringError(RuntimeError):
     """O modelo não devolveu uma pontuação utilizável."""
+
+
+def is_transient(exc: BaseException) -> bool:
+    """Vale tentar de novo daqui a pouco? Decide o retry do job em app/worker.py.
+
+    Pelo status, não pela classe: no SDK, 503/504/529 são irmãs de
+    InternalServerError, não subclasses — um isinstance deixaria o 529 de fora.
+    """
+    if isinstance(exc, APIConnectionError):  # inclui APITimeoutError
+        return True
+    if isinstance(exc, APIStatusError):
+        return exc.status_code in _TRANSIENT_STATUS or exc.status_code >= 500
+    return False
 
 
 def _anthropic_client() -> AsyncAnthropic:
     global _anthropic
     if _anthropic is None:
-        _anthropic = AsyncAnthropic(api_key=settings.anthropic_api_key)
+        # O default do SDK é 600s por chamada: passaria do job_timeout do arq
+        # (300s), que cancela o job e deixa o lead em `pending`. 30s × 3
+        # tentativas cabe com folga.
+        _anthropic = AsyncAnthropic(api_key=settings.anthropic_api_key, timeout=30.0, max_retries=2)
     return _anthropic
 
 

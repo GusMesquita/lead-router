@@ -50,4 +50,9 @@ async def enrich(lead: LeadIn) -> dict:
         # Só o status: o corpo do erro é de um serviço externo e devolvê-lo
         # ao cliente expõe detalhe de infraestrutura que não é nosso.
         return {"cnpj_lookup_error": f"consulta de CNPJ falhou ({response.status_code})"}
-    return {"company_data": response.json()}
+    try:
+        return {"company_data": response.json()}
+    except ValueError:
+        # 200 com HTML de proxy/manutenção: sem isto o lead falhava por causa
+        # de um dado opcional.
+        return {"cnpj_lookup_error": "consulta de CNPJ devolveu resposta inválida"}

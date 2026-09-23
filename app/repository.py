@@ -56,13 +56,20 @@ async def get_lead(session: AsyncSession, lead_id: str) -> LeadRecord | None:
 
 
 async def mark_done(
-    session: AsyncSession, record: LeadRecord, *, score: int, reasoning: str, dispatched: bool
+    session: AsyncSession,
+    record: LeadRecord,
+    *,
+    score: int,
+    reasoning: str,
+    dispatched: bool,
+    error: str | None = None,
 ) -> LeadRecord:
+    """`error` aqui é falha de entrega: o lead foi pontuado, o webhook não recebeu."""
     record.status = LeadStatus.DONE
     record.score = score
     record.reasoning = reasoning
     record.dispatched = dispatched
-    record.error = None
+    record.error = error
     return await _save(session, record)
 
 

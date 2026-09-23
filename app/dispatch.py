@@ -62,6 +62,10 @@ def _signature_headers(body: bytes) -> dict[str, str]:
 
 
 async def dispatch(result: LeadResult) -> bool:
+    """True se entregou; False se não havia o que entregar (sem destino ou
+    abaixo do corte). Falha de entrega levanta — quem decide o estado do lead é
+    o worker, e ele não retenta: a entrega é at-least-once no máximo, e o
+    `lead_id` no payload é o que deixa o receptor deduplicar."""
     if not settings.outbound_webhook_url:
         return False
     if result.score < settings.min_score_to_dispatch:
@@ -76,4 +80,7 @@ async def dispatch(result: LeadResult) -> bool:
 
     # Sem corpo nem e-mail no log: o destino e o status bastam para diagnosticar.
     logger.info("dispatch enviado", extra={"host": host, "status": response.status_code})
-    return not response.is_error
+    # Só 2xx conta: um 3xx não é entrega (o redirect não é seguido, e seguir
+    # levaria a PII para um host fora da allowlist).
+    response.raise_for_status()
+    return True
