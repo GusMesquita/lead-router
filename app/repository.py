@@ -55,6 +55,11 @@ async def get_lead(session: AsyncSession, lead_id: str) -> LeadRecord | None:
     return await session.get(LeadRecord, lead_id)
 
 
+async def delete_lead(session: AsyncSession, record: LeadRecord) -> None:
+    await session.delete(record)
+    await session.commit()
+
+
 async def mark_done(
     session: AsyncSession,
     record: LeadRecord,

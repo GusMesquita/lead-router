@@ -4,10 +4,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, status
 from fastapi.middleware.cors import CORSMiddleware
+from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_api_key, verify_auth_config
 from app.config import settings
+from app.db.models import LeadStatus
 from app.db.session import get_session
 from app.dispatch import verify_webhook_config
 from app.logging_config import configure_logging, mask_email
@@ -15,7 +17,7 @@ from app.models import LeadAccepted, LeadIn, LeadRecordOut
 from app.queue import aclose as close_queue
 from app.queue import enqueue_lead
 from app.ratelimit import rate_limit
-from app.repository import create_pending, get_lead, list_leads
+from app.repository import create_pending, delete_lead, get_lead, list_leads
 
 logger = logging.getLogger("lead_router.api")
 
@@ -70,10 +72,25 @@ async def ingest_lead(
     """
     record, created = await create_pending(session, lead, idempotency_key=idempotency_key)
 
-    if created:
-        # Depois do commit, nunca antes: se enfileirássemos primeiro, o worker
-        # poderia procurar um lead que ainda não existe no banco.
-        await enqueue_lead(record.id)
+    # Enfileira também no replay de um lead ainda `pending`: é o que recupera um
+    # enqueue perdido. Não duplica trabalho — o _job_id descarta o job repetido.
+    # Depois do commit, nunca antes: senão o worker poderia procurar um lead
+    # que ainda não existe no banco.
+    if record.status == LeadStatus.PENDING:
+        try:
+            await enqueue_lead(record.id)
+        except (RedisError, OSError):
+            logger.exception("fila indisponível", extra={"lead_id": record.id, "novo": created})
+            # 202 tem que significar "está na fila". Sem desfazer, o lead ficava
+            # `pending` para sempre, e o retry de quem não manda Idempotency-Key
+            # criava outro. Replay não apaga: o lead não nasceu nesta requisição.
+            if created:
+                await delete_lead(session, record)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="fila indisponível; tente de novo",
+                headers={"Retry-After": "5"},
+            ) from None
 
     logger.info(
         "lead aceito",

@@ -16,11 +16,25 @@ services:
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     ports:
       - "127.0.0.1:8000:8000"
+    # Aqui e não no Dockerfile: a mesma imagem roda o worker, que não serve HTTP.
+    # python em vez de curl porque a imagem slim não tem curl.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      # Cobre o `alembic upgrade head` que roda antes do uvicorn.
+      start_period: 20s
     environment: &app_env
       ENVIRONMENT: ${ENVIRONMENT:-dev}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       API_KEYS: ${API_KEYS:-}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      # O dashboard chama a API pelo servidor, não pelo browser (ver .env.example).
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-60}
       OUTBOUND_WEBHOOK_URL: ${OUTBOUND_WEBHOOK_URL:-}
       WEBHOOK_ALLOWED_HOSTS: ${WEBHOOK_ALLOWED_HOSTS:-}
@@ -39,12 +53,17 @@ services:
   worker:
     build: .
     command: arq app.worker.WorkerSettings
+    # O arq encerra o processo quando perde o Redis; sem restart, uma queda
+    # rápida da fila deixava os jobs parados até alguém subir o worker à mão.
+    restart: unless-stopped
     environment: *app_env
     volumes:
       - lead_data:/data
     depends_on:
+      # Saudável = a migração já rodou; antes disso o worker veria o banco
+      # sem a tabela.
       api:
-        condition: service_started
+        condition: service_healthy
       redis:
         condition: service_healthy
 

@@ -29,6 +29,14 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pytest -q
+      - name: Modelos e migrações não divergem
+        # Os testes rodam o upgrade, mas não percebem uma coluna nova em
+        # app/db/models.py sem migração; o check compara os dois.
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///${{ runner.temp }}/alembic-check.db
+        run: |
+          uv run alembic upgrade head
+          uv run alembic check
 
   web:
     name: lint + build + test (web)
@@ -43,7 +51,8 @@ jobs:
           package_json_file: web/package.json
       - uses: actions/setup-node@v7
         with:
-          node-version-file: web/.nvmrc
+          # Relativo à raiz: o working-directory acima não vale para `with:`.
+          node-version-file: .nvmrc
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       # --frozen-lockfile falha se o lockfile não bater com o package.json.
@@ -94,4 +103,4 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # Prova que o Dockerfile constrói; não publica nada.
-      - run: docker build -t lead-routeri .
+      - run: docker build -t lead-router .

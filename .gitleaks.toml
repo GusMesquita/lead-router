@@ -9,5 +9,4 @@ description = "Placeholders de documentação, não segredos"
 # assim um segredo de verdade no README continua sendo pego.
 regexes = [
   '''^\$API_KEY$''',
-  '''^sua-chave$''',
 ]
