@@ -72,11 +72,22 @@ function ScoreCell({ lead }: { lead: LeadRecord }) {
   )
 }
 
+function DispatchCell({ lead }: { lead: LeadRecord }) {
+  if (lead.status !== "done")
+    return <span className="text-muted-foreground">—</span>
+  if (lead.dispatched) return "sim"
+  // Num lead `done`, `error` só pode ser da entrega (o worker não retenta).
+  if (lead.error) return <Badge variant="destructive">entrega falhou</Badge>
+  return "não"
+}
+
 export function LeadsPanel({ leads }: { leads: LeadRecord[] }) {
   const router = useRouter()
   const [filter, setFilter] = useState<TierFilter>("all")
   const counts = countByTier(leads)
-  const pendentes = counts.pendente
+  // Só `pending` ainda vai mudar; `failed` também não tem pontuação, mas não
+  // sai desse estado — contá-lo aqui mantinha o polling ligado para sempre.
+  const pendentes = leads.filter((lead) => lead.status === "pending").length
 
   // O lead chega `pending` e vira `done` num worker, fora desta aba. Sem isto a
   // página mentiria até alguém apertar F5 — e só enquanto há o que esperar.
@@ -91,7 +102,7 @@ export function LeadsPanel({ leads }: { leads: LeadRecord[] }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Leads</CardTitle>
+        <CardTitle>Leads recentes</CardTitle>
         <CardDescription>
           {leads.length} recebidos · {counts.quente} quentes
           {pendentes > 0 ? ` · ${pendentes} aguardando pontuação` : ""}
@@ -127,7 +138,7 @@ export function LeadsPanel({ leads }: { leads: LeadRecord[] }) {
           </ToggleGroupItem>
           <ToggleGroupItem value="frio">Frios ({counts.frio})</ToggleGroupItem>
           <ToggleGroupItem value="pendente">
-            Pendentes ({pendentes})
+            Sem pontuação ({counts.pendente})
           </ToggleGroupItem>
         </ToggleGroup>
 
@@ -153,7 +164,9 @@ export function LeadsPanel({ leads }: { leads: LeadRecord[] }) {
                 <TableCell>
                   <ScoreCell lead={lead} />
                 </TableCell>
-                <TableCell>{lead.dispatched ? "sim" : "não"}</TableCell>
+                <TableCell>
+                  <DispatchCell lead={lead} />
+                </TableCell>
                 <TableCell className="text-muted-foreground tabular-nums">
                   {new Date(lead.created_at).toLocaleString("pt-BR")}
                 </TableCell>
@@ -163,7 +176,7 @@ export function LeadsPanel({ leads }: { leads: LeadRecord[] }) {
               <TableRow>
                 <TableCell
                   colSpan={6}
-                  className="text-muted-foreground py-8 text-center"
+                  className="py-8 text-center text-muted-foreground"
                 >
                   Nenhum lead nesta faixa.
                 </TableCell>

@@ -9,13 +9,19 @@ import type { LeadRecord } from "./leads"
 
 const BASE_URL = process.env.LEAD_ROUTER_URL ?? "http://localhost:8000"
 
+/** O máximo que GET /leads aceita por página (app/main.py). */
+export const LEADS_WINDOW = 200
+
 export class LeadApiError extends Error {
   constructor(readonly status: number) {
     super(`a API respondeu ${status}`)
   }
 }
 
-export async function fetchLeads(limit = 50, offset = 0): Promise<LeadRecord[]> {
+export async function fetchLeads(
+  limit = 50,
+  offset = 0
+): Promise<LeadRecord[]> {
   const key = process.env.LEAD_ROUTER_API_KEY
 
   const response = await fetch(
@@ -25,6 +31,8 @@ export async function fetchLeads(limit = 50, offset = 0): Promise<LeadRecord[]> 
       // Leads mudam de `pending` para `done` fora do nosso controle: cachear
       // esta resposta mostraria um lead eternamente pendente.
       cache: "no-store",
+      // Uma API pendurada vira o card de erro, não uma página que nunca carrega.
+      signal: AbortSignal.timeout(5000),
     }
   )
 

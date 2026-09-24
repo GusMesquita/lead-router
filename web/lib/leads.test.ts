@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest"
 
-import { countByTier, filterByTier, tierFor, type LeadRecord } from "./leads"
+import {
+  countByTier,
+  filterByTier,
+  summarize,
+  tierFor,
+  type LeadRecord,
+} from "./leads"
 
 function lead(id: string, score: number | null): LeadRecord {
   return {
@@ -49,5 +55,43 @@ describe("lead sem pontuação", () => {
     expect(filterByTier(leads, "pendente").map((l) => l.id)).toEqual(["c", "d"])
     expect(filterByTier(leads, "frio")).toEqual([])
     expect(filterByTier(leads, "all")).toHaveLength(4)
+  })
+})
+
+describe("summarize", () => {
+  it("lista vazia não inventa média", () => {
+    const resumo = summarize([])
+    expect(resumo.total).toBe(0)
+    expect(resumo.averageScore).toBeNull()
+  })
+
+  it("separa status, faixas e resultado da entrega", () => {
+    const falhou: LeadRecord = {
+      ...lead("f", null),
+      status: "failed",
+      error: "ScoringError",
+    }
+    const entregue: LeadRecord = { ...lead("e", 90), dispatched: true }
+    const entregaFalhou: LeadRecord = {
+      ...lead("x", 75),
+      error: "HTTPStatusError",
+    }
+    const resumo = summarize([
+      lead("a", 50),
+      lead("p", null),
+      falhou,
+      entregue,
+      entregaFalhou,
+    ])
+
+    expect(resumo).toMatchObject({ total: 5, pending: 1, done: 3, failed: 1 })
+    expect(resumo.tiers).toEqual({ quente: 2, morno: 1, frio: 0 })
+    // Pendente e falho ficam fora da média: (50 + 90 + 75) / 3.
+    expect(resumo.averageScore).toBe(72)
+    expect(resumo).toMatchObject({
+      dispatched: 1,
+      deliveryFailed: 1,
+      notDispatched: 1,
+    })
   })
 })
