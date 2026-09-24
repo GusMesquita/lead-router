@@ -120,7 +120,7 @@ async def read_lead(
     dependencies=[Depends(require_api_key), Depends(rate_limit)],
 )
 async def get_leads(
-    limit: int = Query(default=50, le=200),
+    limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
 ) -> list[LeadRecordOut]:

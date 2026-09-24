@@ -17,7 +17,7 @@ from starlette.requests import Request
 from app import dispatch as dispatch_module
 from app import enrichment, ratelimit
 from app.auth import verify_auth_config
-from app.config import settings
+from app.config import Settings, settings
 from app.logging_config import mask_email
 from app.models import LeadIn, LeadResult
 
@@ -90,6 +90,13 @@ def test_verify_webhook_config_barra_destino_invalido(monkeypatch):
 
     with pytest.raises(ValueError):
         dispatch_module.verify_webhook_config()
+
+
+def test_corte_do_dispatch_tem_default_60(monkeypatch):
+    """Sem .env, o default é o mesmo do .env.example e do compose."""
+    monkeypatch.delenv("MIN_SCORE_TO_DISPATCH", raising=False)
+
+    assert Settings(_env_file=None).min_score_to_dispatch == 60
 
 
 def _resultado() -> LeadResult:
