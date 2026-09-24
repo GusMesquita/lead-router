@@ -1,5 +1,5 @@
-# Sobe a pilha inteira: fila, API e worker. A API sozinha aceita leads mas nunca
-# os processa — por isso o worker é serviço, não um extra opcional.
+# Sobe a pilha inteira: fila, API, worker e dashboard. A API sozinha aceita
+# leads mas nunca os processa — por isso o worker é serviço, não um extra opcional.
 services:
   redis:
     image: redis:8-alpine
@@ -65,6 +65,36 @@ services:
       api:
         condition: service_healthy
       redis:
+        condition: service_healthy
+
+  web:
+    build:
+      # Contexto na raiz para o build conferir o Node contra o .nvmrc.
+      context: .
+      dockerfile: web/Dockerfile
+    ports:
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      # node em vez de curl pelo mesmo motivo da API: a imagem slim não tem curl.
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/design-system').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    environment:
+      # O servidor Next chama a API pelo DNS do compose, não por localhost: dentro
+      # deste container, localhost:8000 é ele mesmo. O browser nunca fala com a
+      # API — por isso CORS_ORIGINS segue vazio.
+      LEAD_ROUTER_URL: http://api:8000
+      # Uma das API_KEYS (vazio basta com ENVIRONMENT=dev e API_KEYS vazio). Só
+      # o servidor lê; nunca NEXT_PUBLIC_.
+      LEAD_ROUTER_API_KEY: ${LEAD_ROUTER_API_KEY:-}
+    depends_on:
+      api:
         condition: service_healthy
 
 volumes:

@@ -98,9 +98,14 @@ jobs:
         run: pnpm audit --audit-level high
 
   docker:
-    name: build da imagem
+    name: build das imagens
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      # Prova que o Dockerfile constrói; não publica nada.
-      - run: docker build -t lead-router .
+      # Prova que as duas imagens de produção constroem; não publica nada.
+      - name: API e worker
+        run: docker build -t lead-router-api .
+      - name: Dashboard
+        # Contexto na raiz, como no compose: o build confere o Node contra o
+        # .nvmrc. Sem LEAD_ROUTER_* aqui — a chave só existe em runtime.
+        run: docker build -f web/Dockerfile -t lead-router-web .
