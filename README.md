@@ -66,7 +66,7 @@ curl localhost:8000/leads/<id> -H "X-API-Key: $API_KEY"
 docker compose up --build
 ```
 
-Sobe Redis, API (em `127.0.0.1:8000`, rodando `alembic upgrade head` antes de servir) e worker, com o SQLite num volume compartilhado. As variáveis vêm do ambiente ou de `.env`. O container roda como usuário sem privilégio; um volume `lead_data` criado por uma versão antiga da imagem (como root) precisa de `docker compose down -v`.
+Sobe a pilha inteira: Redis, a API em http://localhost:8000 (rodando `alembic upgrade head` antes de servir), o worker e o dashboard em http://localhost:3000, com o SQLite num volume compartilhado. API e worker usam a imagem da raiz; o dashboard, a de `web/Dockerfile` (build de produção, standalone, sem segredo embutido). O dashboard só sobe depois do healthcheck da API e fala com ela por `http://api:8000`, na rede do compose; defina `LEAD_ROUTER_API_KEY` no `.env` com uma das `API_KEYS`. As variáveis vêm do ambiente ou de `.env`. O container roda como usuário sem privilégio; um volume `lead_data` criado por uma versão antiga da imagem (como root) precisa de `docker compose down -v`.
 
 ## Migrações
 
@@ -106,7 +106,8 @@ pnpm lint && pnpm typecheck && pnpm test
 pnpm registry:build && git diff --exit-code public/r
 pnpm build
 
-docker build -t lead-router .
+docker build -t lead-router-api .
+docker build -f web/Dockerfile -t lead-router-web .
 ```
 
 O Node vem de `.nvmrc` (mise lê `.mise.toml`, com a mesma versão); o pnpm, do `packageManager` de `web/package.json`, que o Corepack local e o `pnpm/action-setup` do CI leem.

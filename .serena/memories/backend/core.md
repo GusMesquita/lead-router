@@ -30,6 +30,7 @@ Flow and semantics live in `docs/processing-contract.md`; this is what that doc 
 - Same image runs API and worker; healthcheck is in `compose.yaml` (python urllib — slim image has no curl), not in the Dockerfile.
 - Runs as uid 10001; `/data` is chowned in the image. A `lead_data` volume created by an older root image keeps root ownership → `docker compose down -v`.
 - Migrations run in the API `command` before uvicorn; the worker waits for API healthy.
+- The `web` service uses its own image (`web/Dockerfile`, build context = repo root so it can check `.nvmrc`; ignore rules in `web/Dockerfile.dockerignore`). It reaches the API at `http://api:8000` and waits for API healthy.
 
 ## Tests / schema
 

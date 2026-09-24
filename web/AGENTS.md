@@ -1,7 +1,11 @@
 <!-- BEGIN:nextjs-agent-rules -->
+
 # This is NOT the Next.js you know
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
 <!-- END:nextjs-agent-rules -->
 
 # web/
@@ -11,11 +15,14 @@ Regras gerais do repositório em `../AGENTS.md`; aqui só o que é do `web/`.
 ## Produto × catálogo
 
 - **Produto:** a rota `/` (`app/page.tsx`), `components/leads/`, `lib/` e
-  `registry/gmui/`. É o que consome a API.
-- **Catálogo manual, intencional:** `/design-system`, as demos `/dashboard`,
-  `/dashboard01`, `/dashboard02`, `/login`, `/signup`, `/startup` e os
-  componentes que só elas usam (`components/dashboard*`, `components/startup`,
-  `components/beste`, `components/bjork-ui`, os `nav-*`, `app-sidebar` etc.).
+  `registry/gmui/`. É o que consome a API, com shell e sidebar próprios
+  (`components/leads/product-shell.tsx`) — não reusar `app-sidebar`/`nav-*`,
+  que são da demo, nem dados de exemplo do catálogo.
+- **Catálogo manual, intencional:** `/design-system` (seções em
+  `components/design-system/`), as demos `/dashboard`, `/dashboard01`,
+  `/dashboard02`, `/login`, `/signup`, `/startup` e os componentes que só elas
+  usam (`components/dashboard*`, `components/startup`, `components/beste`,
+  `components/bjork-ui`, os `nav-*`, `app-sidebar` etc.).
 - Não apagar rota, componente ou dependência do catálogo por não ser importado
   por `/`. Limpeza do catálogo é revisão manual, fora de tarefas de agente.
 

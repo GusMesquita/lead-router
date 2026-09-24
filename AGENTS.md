@@ -70,7 +70,8 @@ uv run ruff check .
 uv run ruff format --check .
 uv run pytest -q
 DATABASE_URL=sqlite+aiosqlite:////tmp/check.db sh -c 'uv run alembic upgrade head && uv run alembic check'
-docker build -t lead-router .
+docker build -t lead-router-api .
+docker build -f web/Dockerfile -t lead-router-web .
 ```
 
 Para o `web/`, os comandos estão em `web/AGENTS.md`. O Node vem de `.nvmrc`
@@ -94,7 +95,10 @@ gerenciador, nunca à mão.
 ## Arquivos gerados — preservar
 
 - O bloco entre `<!-- BEGIN:nextjs-agent-rules -->` e
-  `<!-- END:nextjs-agent-rules -->` em `web/AGENTS.md`.
+  `<!-- END:nextjs-agent-rules -->` em `web/AGENTS.md`. É do Next: `next dev`,
+  ao detectar um agente, troca só esse trecho pelo texto canônico da versão
+  instalada. Aceite a versão gerada (e versione-a num upgrade do Next) em vez
+  de restaurar a antiga; instruções nossas ficam fora dos marcadores.
 - `web/public/r/`, `uv.lock`, `web/pnpm-lock.yaml`, `alembic/versions/` já
   aplicadas (migração nova em vez de editar uma antiga).
 

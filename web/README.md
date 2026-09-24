@@ -4,18 +4,43 @@ Next.js 16 (App Router), React 19, Tailwind 4 e shadcn/ui.
 
 ```bash
 pnpm install
-cp .env.example .env.local
+cp .env.example .env.local   # LEAD_ROUTER_URL=http://localhost:8000
 pnpm dev
 ```
 
+Pela pilha inteira (`docker compose up --build` na raiz), o dashboard roda da
+imagem de `web/Dockerfile` em http://localhost:3000 e fala com a API por
+`http://api:8000` — o nome do serviço na rede do compose, porque `localhost`
+dentro do container é o próprio container. A chave vem de
+`LEAD_ROUTER_API_KEY` no `.env` da raiz, lida só no runtime do servidor; a
+imagem não carrega segredo nenhum.
+
 ## Rotas
 
-| Rota             | O que é                                                        |
-| ---------------- | -------------------------------------------------------------- |
-| `/`              | Dashboard de leads — faixas, pendentes e motivo da pontuação    |
-| `/design-system` | Os componentes numa página só                                   |
-| `/startup`       | Landing de exemplo                                              |
-| `/dashboard*`    | Templates de dashboard que vieram dos registries                |
+| Rota                | O que é                                                                  |
+| ------------------- | ------------------------------------------------------------------------ |
+| `/`                 | Produto: métricas e leads recentes, com dados reais da API               |
+| `/design-system`    | Catálogo: fundamentos, componentes por família, produto, `@gmui`, blocos |
+| `/dashboard`        | Demo de dashboard (sidebar, gráfico, tabela arrastável; `data.json`)     |
+| `/dashboard01`      | Demo de dashboard (`components/dashboard-01`)                            |
+| `/dashboard02`      | Demo de dashboard (`components/dashboard`)                               |
+| `/startup`          | Landing de exemplo                                                       |
+| `/login`, `/signup` | Formulários de exemplo                                                   |
+
+## Dashboard de produto
+
+`/` busca os 200 leads mais recentes (o máximo por página de `GET /leads`) e
+calcula tudo sobre essa janela em `summarize()` (`lib/leads.ts`): total por
+status, faixas quente/morno/frio e média só dos pontuados, e o resultado da
+entrega dos `done` (despachado, não despachado, entrega falhou). A API não
+expõe total nem agregados; com mais de 200 leads, a página avisa que os números
+são da janela. Estados: carregando (`Suspense` + esqueleto), erro
+(`ApiErrorCard`, com a saída para 401 e para API fora do ar), vazio (com o
+`curl` de ingestão) e populado.
+
+A sidebar do produto (`components/leads/product-shell.tsx`) só lista o que
+existe: "Visão geral" e, no rodapé, o link para o catálogo. Leads, Roteamento,
+Integrações etc. esperam endpoints que a API ainda não tem.
 
 ## Onde a chave fica
 
