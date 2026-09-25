@@ -17,7 +17,9 @@ class Settings(BaseSettings):
     # Fila do worker (app/worker.py). Sem Redis de pé, POST /leads/ingest grava
     # o lead e falha ao enfileirar — o lead não se perde, mas ninguém o processa.
     redis_url: str = "redis://localhost:6379"
-    min_score_to_dispatch: int = 0
+    # Corte do dispatch (app/dispatch.py): lead abaixo dele fica `done` sem
+    # sair. Mesmo valor do .env.example e do compose.yaml.
+    min_score_to_dispatch: int = 60
 
     # Destino do webhook de saída. Recebe PII do lead, por isso exige https e
     # host explicitamente permitido — ver app/dispatch.py.

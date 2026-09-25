@@ -5,16 +5,21 @@ chamada de LLM aconteça. Se alguém reintroduzir o enriquecimento ou a pontuaç
 no caminho da requisição, este arquivo quebra.
 """
 
+import anthropic
+import httpx
 import pytest
+from arq import Retry
 from httpx import ASGITransport, AsyncClient
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 import app.main as main_module
+import app.queue as queue_module
 import app.worker as worker_module
 from app.db.models import LeadStatus
 from app.db.session import get_session
 from app.main import app
 from app.models import LeadIn
-from app.repository import create_pending, get_lead
+from app.repository import create_pending, get_lead, mark_done
 
 LEAD = {"name": "Ana", "email": "ana@exemplo.com", "cnpj": "19131243000197"}
 
@@ -108,9 +113,109 @@ async def test_idempotency_key_nao_cria_lead_duplicado(fila):
 
     assert primeira.status_code == segunda.status_code == 202
     assert primeira.json()["id"] == segunda.json()["id"]
-    # E, mais importante que o id: o replay não gerou outro job — cada job
-    # custa uma chamada ao LLM.
-    assert fila == [primeira.json()["id"]]
+    # O replay de um lead ainda `pending` reenfileira o mesmo id; quem impede o
+    # job duplicado (e a segunda chamada ao LLM) é o _job_id — ver o teste de
+    # enqueue_lead abaixo.
+    assert set(fila) == {primeira.json()["id"]}
+
+
+@pytest.mark.asyncio
+async def test_enqueue_usa_o_id_do_lead_como_job_id(monkeypatch):
+    chamadas = []
+
+    class FakePool:
+        async def enqueue_job(self, *args, **kwargs):
+            chamadas.append((args, kwargs))
+
+    async def fake_pool():
+        return FakePool()
+
+    monkeypatch.setattr(queue_module, "get_pool", fake_pool)
+    await queue_module.enqueue_lead("abc")
+    await queue_module.enqueue_lead("abc")
+
+    # Mesmo _job_id nas duas: o arq ignora a segunda enquanto a primeira existir.
+    assert chamadas == [(("process_lead", "abc"), {"_job_id": "lead:abc"})] * 2
+
+
+@pytest.fixture
+def redis_fora(monkeypatch) -> list[str]:
+    """Enqueue quebrando depois do commit do lead — o caso que deixava órfão."""
+    tentativas: list[str] = []
+
+    async def enqueue_quebrado(lead_id: str) -> None:
+        tentativas.append(lead_id)
+        raise RedisConnectionError("Error 111 connecting to redis:6379")
+
+    monkeypatch.setattr(main_module, "enqueue_lead", enqueue_quebrado)
+    return tentativas
+
+
+@pytest.mark.asyncio
+async def test_fila_fora_desfaz_o_lead_e_responde_503(redis_fora):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await _post(client)
+
+    assert response.status_code == 503
+    assert response.headers["Retry-After"]
+    # Sem desfazer, este lead ficaria `pending` para sempre: ninguém o enfileira.
+    assert await _lead(redis_fora[0]) is None
+
+
+@pytest.mark.asyncio
+async def test_retry_com_a_mesma_chave_depois_da_fila_voltar(redis_fora, monkeypatch):
+    headers = {"Idempotency-Key": "fila-caiu-1"}
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        assert (await _post(client, headers=headers)).status_code == 503
+
+        enfileirados: list[str] = []
+
+        async def enqueue_ok(lead_id: str) -> None:
+            enfileirados.append(lead_id)
+
+        monkeypatch.setattr(main_module, "enqueue_lead", enqueue_ok)
+        response = await _post(client, headers=headers)
+
+    assert response.status_code == 202
+    assert enfileirados == [response.json()["id"]]
+    assert (await _lead(response.json()["id"])).status == LeadStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_replay_de_lead_pending_reenfileira_e_nao_apaga(fila, monkeypatch):
+    """Um lead `pending` sem job (enqueue perdido) se recupera no replay da chave."""
+    headers = {"Idempotency-Key": "replay-pending-1"}
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        lead_id = (await _post(client, headers=headers)).json()["id"]
+
+        async def enqueue_quebrado(lead_id: str) -> None:
+            raise RedisConnectionError("fora")
+
+        monkeypatch.setattr(main_module, "enqueue_lead", enqueue_quebrado)
+        falhou = await _post(client, headers=headers)
+
+    assert falhou.status_code == 503
+    # O lead não nasceu nesta requisição: apagá-lo perderia o que o 202 anterior aceitou.
+    assert (await _lead(lead_id)).status == LeadStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_replay_de_lead_ja_processado_nao_reenfileira(fila):
+    headers = {"Idempotency-Key": "replay-done-1"}
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        lead_id = (await _post(client, headers=headers)).json()["id"]
+        async for session in get_session():
+            await mark_done(
+                session, await get_lead(session, lead_id), score=1, reasoning="x", dispatched=False
+            )
+        response = await _post(client, headers=headers)
+
+    assert response.json() == {"id": lead_id, "status": LeadStatus.DONE}
+    assert fila == [lead_id]
 
 
 @pytest.mark.asyncio
@@ -162,27 +267,103 @@ async def test_corrida_na_mesma_chave_devolve_o_lead_que_ganhou(monkeypatch):
     assert perdedor.id == vencedor.id
 
 
+async def _lead_pendente() -> str:
+    async for session in get_session():
+        record, _ = await create_pending(session, LeadIn(**LEAD), idempotency_key=None)
+        return record.id
+
+
+async def _lead(lead_id: str):
+    async for session in get_session():
+        return await get_lead(session, lead_id)
+
+
+def _anthropic_503() -> anthropic.APIStatusError:
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    return anthropic.ServiceUnavailableError(
+        "indisponível", response=httpx.Response(503, request=request), body=None
+    )
+
+
+def _pipeline(monkeypatch, *, score_exc=None, dispatch_exc=None) -> None:
+    async def fake_enrich(lead):
+        return {}
+
+    async def fake_score(lead, enrichment):
+        if score_exc is not None:
+            raise score_exc
+        return 80, "ok"
+
+    async def fake_dispatch(result):
+        if dispatch_exc is not None:
+            raise dispatch_exc
+        return True
+
+    monkeypatch.setattr(worker_module, "enrich", fake_enrich)
+    monkeypatch.setattr(worker_module, "score", fake_score)
+    monkeypatch.setattr(worker_module, "dispatch", fake_dispatch)
+
+
 @pytest.mark.asyncio
-async def test_falha_no_worker_marca_o_lead_como_failed(fila, monkeypatch):
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        lead_id = (await _post(client)).json()["id"]
+async def test_falha_permanente_marca_failed_sem_retentar(monkeypatch):
+    """Com o POST assíncrono, a falha não tem para quem voltar: fica no lead,
+    sem score falso. E não re-levanta — o arq só logaria a mensagem crua."""
+    lead_id = await _lead_pendente()
 
-        async def enrich_quebrado(lead):
-            raise RuntimeError("BrasilAPI fora do ar em https://interno/segredo")
+    async def enrich_quebrado(lead):
+        raise RuntimeError("BrasilAPI fora do ar em https://interno/segredo")
 
-        monkeypatch.setattr(worker_module, "enrich", enrich_quebrado)
-        with pytest.raises(RuntimeError):
-            # Propaga de propósito: é o que faz o arq retentar o job.
-            await worker_module.process_lead({}, lead_id)
+    monkeypatch.setattr(worker_module, "enrich", enrich_quebrado)
+    await worker_module.process_lead({"job_try": 1}, lead_id)
 
-        falhou = (await client.get(f"/leads/{lead_id}")).json()
-
-    assert falhou["status"] == LeadStatus.FAILED
+    falhou = await _lead(lead_id)
+    assert falhou.status == LeadStatus.FAILED
+    assert falhou.score is None
     # Só a classe do erro: a mensagem crua carregava uma URL interna, e este
     # campo é devolvido pela API.
-    assert falhou["error"] == "RuntimeError"
-    assert "interno" not in (falhou["error"] or "")
+    assert falhou.error == "RuntimeError"
+
+
+@pytest.mark.asyncio
+async def test_falha_transitoria_retenta_com_o_lead_ainda_pending(monkeypatch):
+    lead_id = await _lead_pendente()
+    _pipeline(monkeypatch, score_exc=_anthropic_503())
+
+    with pytest.raises(Retry) as exc:
+        await worker_module.process_lead({"job_try": 1}, lead_id)
+
+    assert exc.value.defer_score == 30_000  # ms
+    # Se virasse `failed` aqui, a guarda de status descartaria a tentativa 2.
+    lead = await _lead(lead_id)
+    assert lead.status == LeadStatus.PENDING
+    assert lead.error is None
+
+
+@pytest.mark.asyncio
+async def test_falha_transitoria_na_ultima_tentativa_marca_failed(monkeypatch):
+    lead_id = await _lead_pendente()
+    _pipeline(monkeypatch, score_exc=_anthropic_503())
+
+    await worker_module.process_lead({"job_try": worker_module._MAX_TRIES}, lead_id)
+
+    lead = await _lead(lead_id)
+    assert lead.status == LeadStatus.FAILED
+    assert lead.error == "ServiceUnavailableError"
+
+
+@pytest.mark.asyncio
+async def test_falha_de_entrega_nao_deixa_o_lead_pending(monkeypatch):
+    lead_id = await _lead_pendente()
+    _pipeline(monkeypatch, dispatch_exc=httpx.ConnectError("recusado"))
+
+    await worker_module.process_lead({"job_try": 1}, lead_id)
+
+    lead = await _lead(lead_id)
+    # O score é bom e já foi pago: fica, e a entrega falha fica visível.
+    assert lead.status == LeadStatus.DONE
+    assert lead.score == 80
+    assert lead.dispatched is False
+    assert lead.error == "ConnectError"
 
 
 @pytest.mark.asyncio

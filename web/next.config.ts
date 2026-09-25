@@ -15,6 +15,9 @@ const securityHeaders = [
 ]
 
 const nextConfig: NextConfig = {
+  // Gera .next/standalone (server.js + só as dependências rastreadas): é o que
+  // a imagem de web/Dockerfile roda. `next start` segue funcionando, com aviso.
+  output: "standalone",
   // Anunciar a versão do framework só ajuda quem procura alvo por versão.
   poweredByHeader: false,
   async headers() {

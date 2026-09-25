@@ -1,0 +1,11 @@
+# Vale só para web/Dockerfile (o .dockerignore da raiz é do backend e exclui
+# web/). Contexto = raiz: entra só o .nvmrc e o web/ sem artefatos locais.
+*
+!.nvmrc
+!web/
+web/node_modules
+web/.next
+web/.env*
+web/*.tsbuildinfo
+web/next-env.d.ts
+web/Dockerfile*

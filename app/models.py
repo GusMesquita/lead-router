@@ -20,6 +20,11 @@ class LeadIn(BaseModel):
 
 
 class LeadResult(BaseModel):
+    """Payload do webhook de saída (app/dispatch.py)."""
+
+    # A entrega pode se repetir (crash entre o POST e o commit); é por este id
+    # que o receptor reconhece o mesmo lead.
+    lead_id: str
     lead: LeadIn
     enrichment: dict
     score: int

@@ -481,6 +481,7 @@ dependencies = [
     { name = "greenlet" },
     { name = "httpx" },
     { name = "pydantic-settings" },
+    { name = "redis" },
     { name = "sqlmodel" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -503,6 +504,7 @@ requires-dist = [
     { name = "greenlet", specifier = ">=3.0" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "pydantic-settings", specifier = ">=2.4" },
+    { name = "redis", specifier = ">=5.3" },
     { name = "sqlmodel", specifier = ">=0.0.22" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]

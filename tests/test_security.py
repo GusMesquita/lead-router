@@ -17,7 +17,7 @@ from starlette.requests import Request
 from app import dispatch as dispatch_module
 from app import enrichment, ratelimit
 from app.auth import verify_auth_config
-from app.config import settings
+from app.config import Settings, settings
 from app.logging_config import mask_email
 from app.models import LeadIn, LeadResult
 
@@ -92,6 +92,43 @@ def test_verify_webhook_config_barra_destino_invalido(monkeypatch):
         dispatch_module.verify_webhook_config()
 
 
+def test_corte_do_dispatch_tem_default_60(monkeypatch):
+    """Sem .env, o default é o mesmo do .env.example e do compose."""
+    monkeypatch.delenv("MIN_SCORE_TO_DISPATCH", raising=False)
+
+    assert Settings(_env_file=None).min_score_to_dispatch == 60
+
+
+def _resultado() -> LeadResult:
+    return LeadResult(
+        lead_id="lead-1",
+        lead=LeadIn(name="Bia", email="bia@exemplo.com"),
+        enrichment={},
+        score=90,
+        reasoning="ok",
+        dispatched=False,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [500, 302])
+async def test_resposta_nao_2xx_nao_conta_como_entrega(monkeypatch, status):
+    """302 incluso: o redirect não é seguido, então nada chegou ao destino."""
+    _webhook(monkeypatch, "https://crm.exemplo.com/hook", "crm.exemplo.com")
+
+    async def fake_post(self, url, **kwargs):
+        return httpx.Response(
+            status,
+            headers={"Location": "https://outro.example/"},
+            request=httpx.Request("POST", url),
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await dispatch_module.dispatch(_resultado())
+
+
 @pytest.mark.asyncio
 async def test_payload_vai_assinado_com_hmac(monkeypatch):
     _webhook(monkeypatch, "https://crm.exemplo.com/hook", "crm.exemplo.com", secret="s3gr3d0")
@@ -104,15 +141,10 @@ async def test_payload_vai_assinado_com_hmac(monkeypatch):
 
     monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
 
-    result = LeadResult(
-        lead=LeadIn(name="Bia", email="bia@exemplo.com"),
-        enrichment={},
-        score=90,
-        reasoning="ok",
-        dispatched=False,
-    )
-    assert await dispatch_module.dispatch(result) is True
+    assert await dispatch_module.dispatch(_resultado()) is True
 
+    # Sem o id, o receptor não reconhece uma entrega repetida do mesmo lead.
+    assert json.loads(capturado["body"])["lead_id"] == "lead-1"
     headers = capturado["headers"]
     esperado = hmac.new(
         b"s3gr3d0",
@@ -233,3 +265,21 @@ async def test_brasilapi_fora_do_ar_nao_derruba_a_ingestao(monkeypatch):
     )
 
     assert resultado["cnpj_lookup_error"].startswith("consulta de CNPJ indisponível")
+
+
+@pytest.mark.asyncio
+async def test_brasilapi_com_200_nao_json_nao_derruba_a_ingestao(monkeypatch):
+    """200 com HTML (proxy, manutenção): o lead segue sem os dados da empresa."""
+
+    async def html(self, url, **kwargs):
+        return httpx.Response(
+            200, text="<html>manutenção</html>", request=httpx.Request("GET", url)
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", html)
+
+    resultado = await enrichment.enrich(
+        LeadIn(name="Fulano", email="fulano@exemplo.com", cnpj="19131243000197")
+    )
+
+    assert resultado == {"cnpj_lookup_error": "consulta de CNPJ devolveu resposta inválida"}

@@ -38,3 +38,15 @@ async def test_ingest_and_leads_require_api_key_when_configured(monkeypatch):
 
     assert unauthorized.status_code == 401
     assert authorized.status_code == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("limit", "status"), [(0, 422), (-1, 422), (201, 422), (1, 200), (200, 200)]
+)
+async def test_get_leads_limit_must_be_between_1_and_200(limit, status):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/leads", params={"limit": limit})
+
+    assert response.status_code == status
